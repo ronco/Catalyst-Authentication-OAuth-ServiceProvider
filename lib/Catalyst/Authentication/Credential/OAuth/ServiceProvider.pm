@@ -1,7 +1,122 @@
 package Catalyst::Authentication::Credential::OAuth::ServiceProvider;
 
-use warnings;
-use strict;
+use Moose;
+use Net::OAuth;
+use Catalyst::Exception ();
+use Catalyst::Utils     ();
+
+use Try::Tiny;
+
+use Yada::Yada::Yada;
+
+use namespace::autoclean;
+
+our $VERSION = '0.01';
+
+has oauth_store => ( is => 'ro', isa => 'HashRef', required => 1 );
+has store => (
+    is         => 'ro',
+    does       => 'Catalyst::Authentication::OAuth::ServiceProvider::Store',
+    lazy_build => 1
+);
+
+sub _build_store {
+    my ($self) = @_;
+    my $storeclass = $self->oauth_store->{class};
+    ## follow catalyst class naming - a + prefix means a fully qualified class, otherwise it's
+    ## taken to mean C::A::OAuth::ServiceProvider::Store::(specifiedclass)
+    if ( $storeclass !~ /^\+(.*)$/ ) {
+        $storeclass =
+          "Catalyst::Authentication::OAuth::ServiceProvider::Store::${storeclass}";
+    }
+    else {
+        $storeclass = $1;
+    }
+
+    try {
+        Catalyst::Utils::ensure_class_loaded($storeclass);
+    }
+    catch {
+        if ( $_ !~ /can't locate/ ) {    #'
+            Catalyst::Exception->throw($_);
+        }
+        else {
+            Catalyst::Exception->throw(
+                "Unable to load OAuth Store class: " . $self->oauth_store->{class} );
+        }
+    };
+
+    my $store = try {
+        $storeclass->new( $self->oauth_store );
+    }
+    catch {
+        Catalyst::Exception->throw("Error initializing OAuth store: $_");
+    };
+}
+
+sub BUILDARGS {
+    my ( $self, $config, $app, $realm ) = @_;
+    return $config;
+}
+
+sub BUILD {
+    my ($self) = @_;
+
+    #ensure oauth store is loaded
+    $self->store;
+}
+
+sub authenticate {
+    my ( $self, $c, $realm, $authinfo ) = @_;
+
+    my $token_string = $c->req->parameters->{oauth_token};
+    my $consumer_key = $c->req->parameters->{oauth_consumer_key};
+    my $sig          = $c->req->parameters->{oauth_signature};
+
+    # fail fast if essential params missing
+    return undef
+      unless ( $token_string && $consumer_key && $sig );
+    my $access_token = $self->store->find_access_token($token_string);
+
+    return undef unless ref($access_token);
+
+    my $consumer_secret = $self->store->find_consumer_secret($consumer_key);
+
+    return undef unless $consumer_secret;
+
+    my $access_request = $self->_access_request( $c, $access_token, $consumer_secret );
+
+    $c->log->debug( "Verifying request using token: " . $token_string );
+    my $valid = $access_request->verify;
+    if ($valid) {
+        return $realm->find_user( $access_token->authinfo );
+    }
+    else {
+        $c->log->warn( "Invalid OAuth request token/signature: " . $token_string );
+        return undef;
+    }
+}
+
+# construct the Access Request OAuth object
+sub _access_request {
+    my ( $self, $c, $access_token, $consumer_secret ) = @_;
+    my $uri = $c->req->uri->clone;
+    $uri->query_form( {} );    # blank params
+    $c->log->debug("Generating request for uri: $uri");
+    return Net::OAuth->request('access token')->from_hash(
+        $c->req->parameters,
+        request_url     => $uri,
+        request_method  => $c->req->method,
+        token_secret    => $access_token->token_secret,
+        consumer_secret => $consumer_secret
+    );
+}
+
+__PACKAGE__->meta->make_immutable;
+
+1;
+
+__END__
 
 =head1 NAME
 
@@ -10,11 +125,6 @@ Catalyst::Authentication::Credential::OAuth::ServiceProvider - The great new Cat
 =head1 VERSION
 
 Version 0.01
-
-=cut
-
-our $VERSION = '0.01';
-
 
 =head1 SYNOPSIS
 
@@ -27,26 +137,9 @@ Perhaps a little code snippet.
     my $foo = Catalyst::Authentication::Credential::OAuth::ServiceProvider->new();
     ...
 
-=head1 EXPORT
-
-A list of functions that can be exported.  You can delete this section
-if you don't export anything, such as for a purely object-oriented module.
-
 =head1 SUBROUTINES/METHODS
 
-=head2 function1
-
-=cut
-
-sub function1 {
-}
-
-=head2 function2
-
-=cut
-
-sub function2 {
-}
+=head2 authenticate
 
 =head1 AUTHOR
 
@@ -105,6 +198,3 @@ by the Free Software Foundation; or the Artistic License.
 See http://dev.perl.org/licenses/ for more information.
 
 
-=cut
-
-1; # End of Catalyst::Authentication::Credential::OAuth::ServiceProvider

@@ -3,6 +3,8 @@ MANIFEST
 Makefile.PL
 README
 lib/Catalyst/Authentication/Credential/OAuth/ServiceProvider.pm
+lib/Catalyst/Authentication/OAuth/ServiceProvider/AccessToken.pm
+lib/Catalyst/Authentication/OAuth/ServiceProvider/Store/Minimal.pm
 t/00-load.t
 t/manifest.t
 t/pod-coverage.t
