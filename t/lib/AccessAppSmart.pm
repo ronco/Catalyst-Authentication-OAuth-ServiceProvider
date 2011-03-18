@@ -3,8 +3,6 @@ package AccessAppSmart;
 use Moose;
 use namespace::autoclean;
 
-warn "used AccessAppSmart";
-
 use Catalyst qw/Authentication
                SmartURI/;
 extends qw/Catalyst/;

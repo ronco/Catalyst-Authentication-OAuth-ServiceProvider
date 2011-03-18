@@ -1,7 +1,7 @@
 use strict;
 use warnings;
 
-use Test::More tests => 4;
+use Test::More tests => 5;
 use Net::OAuth;
 
 use lib 't/lib';
@@ -27,6 +27,12 @@ my $response;
 $response = request( $request->to_url );
 # unsigned should fail:
 cmp_ok( $response->content, 'eq', 'not authed', 'missing signature');
+
+# bogus signature should fail:
+$request->signature('let_me_in');
+$response = request( $request->to_url );
+cmp_ok( $response->content, 'eq', 'not authed', 'missing signature');
+
 
 #signed should succeed
 $request->sign;

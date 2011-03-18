@@ -74,25 +74,40 @@ sub authenticate {
     my $sig          = $c->req->parameters->{oauth_signature};
 
     # fail fast if essential params missing
-    return undef
-      unless ( $token_string && $consumer_key && $sig );
+    if ( !( $token_string && $consumer_key && $sig ) ) {
+        $c->log->debug("OAuth authentication failed due to missing params");
+        return undef;
+    }
     my $access_token = $self->store->find_access_token($token_string);
 
-    return undef unless ref($access_token);
+    if ( !ref($access_token) ) {
+        $c->log->debug("OAuth authentication failed due to invalid access token");
+        return undef;
+    }
 
     my $consumer_secret = $self->store->find_consumer_secret($consumer_key);
 
-    return undef unless $consumer_secret;
+    if ( !$consumer_secret ) {
+        $c->log->debug("OAuth authentication failed due to invalid consumer_key");
+        return undef;
+    }
 
     my $access_request = $self->_access_request( $c, $access_token, $consumer_secret );
 
     $c->log->debug( "Verifying request using token: " . $token_string );
     my $valid = $access_request->verify;
     if ($valid) {
-        return $realm->find_user( $access_token->authinfo );
+        $c->log->debug("OAuth authentication validated, finding user in realm");
+        return $realm->find_user( $access_token->authinfo, $c );
     }
     else {
         $c->log->warn( "Invalid OAuth request token/signature: " . $token_string );
+        if ( $c->log->is_debug ) {
+            $access_request->sign;
+            $c->log->debug("Calculated base string: " . $access_request->signature_base_string);
+            $c->log->debug(
+                "Calculated OAuth sig: " . $access_request->signature . " Given: $sig" );
+        }
         return undef;
     }
 }
